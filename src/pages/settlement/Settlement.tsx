@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
 import { formatCurrency } from '@/utils/storage';
 import { OrderStatusBadge, SpecBadge } from '@/components/shared/StatusBadges';
+import type { ExpenseCategory } from '@/types';
 import {
   Calculator,
   Search,
-  Filter,
   Plus,
   DollarSign,
   Users,
@@ -25,19 +25,46 @@ import {
   Download,
   AlertCircle,
   XCircle,
+  X,
+  Check,
+  Edit2,
+  Trash2,
+  RotateCcw,
 } from 'lucide-react';
+
+const expenseCategories: ExpenseCategory[] = ['服务费', '物资费', '乐队费', '场地费', '其他'];
+
+const categoryColors: Record<ExpenseCategory, string> = {
+  '服务费': 'bg-linen/10 text-linen border-linen/30',
+  '物资费': 'bg-gold/10 text-gold-dark border-gold/30',
+  '乐队费': 'bg-cinnabar/10 text-cinnabar border-cinnabar/30',
+  '场地费': 'bg-jade/10 text-jade border-jade/30',
+  '其他': 'bg-ink-100 text-ink-700 border-ink-200',
+};
 
 export default function Settlement() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { orders, staff, expenses, staffShares, addStaffShare, updateStaffShare } = useAppStore();
+  const navigate = useNavigate();
+  const { orders, staff, expenses, staffShares, schedules, addExpense, updateExpense, addStaffShare, updateStaffShare } = useAppStore();
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'expenses' | 'shares'>('expenses');
+  const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
+  const [newExpense, setNewExpense] = useState({
+    category: '服务费' as ExpenseCategory,
+    item: '',
+    amount: '',
+    paid: false,
+  });
 
   useEffect(() => {
     const orderIdFromUrl = searchParams.get('orderId');
+    const tabFromUrl = searchParams.get('tab');
     if (orderIdFromUrl && orders.find((o) => o.id === orderIdFromUrl)) {
       setSelectedOrder(orderIdFromUrl);
+      if (tabFromUrl === 'expenses' || tabFromUrl === 'shares') {
+        setActiveTab(tabFromUrl);
+      }
     } else if (!selectedOrder && orders.length > 0) {
       const defaultOrder =
         orders.find((o) => o.status === 'completed' || o.status === 'in-progress')?.id ||
@@ -49,23 +76,35 @@ export default function Settlement() {
 
   const handleOrderSelect = (orderId: string) => {
     setSelectedOrder(orderId);
-    setSearchParams({ orderId });
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('orderId', orderId);
+    setSearchParams(newParams);
+  };
+
+  const handleTabChange = (tab: 'expenses' | 'shares') => {
+    setActiveTab(tab);
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('tab', tab);
+    setSearchParams(newParams);
   };
 
   const currentOrder = orders.find((o) => o.id === selectedOrder);
   const orderExpenses = expenses.filter((e) => e.orderId === selectedOrder);
   const orderShares = staffShares.filter((s) => s.orderId === selectedOrder);
+  const orderSchedules = schedules.filter((s) => s.orderId === selectedOrder);
 
-  const totalExpense = orderExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const paidExpense = orderExpenses.filter((e) => e.paid).reduce((sum, e) => sum + e.amount, 0);
+  const totalExpense = useMemo(() => orderExpenses.reduce((sum, e) => sum + e.amount, 0), [orderExpenses]);
+  const paidExpense = useMemo(() => orderExpenses.filter((e) => e.paid).reduce((sum, e) => sum + e.amount, 0), [orderExpenses]);
   const unpaidExpenseCount = orderExpenses.filter((e) => !e.paid).length;
-  const totalShare = orderShares.reduce((sum, s) => sum + s.total, 0);
-  const settledShare = orderShares.filter((s) => s.settled).reduce((sum, s) => sum + s.total, 0);
+  const totalShare = useMemo(() => orderShares.reduce((sum, s) => sum + s.total, 0), [orderShares]);
+  const settledShare = useMemo(() => orderShares.filter((s) => s.settled).reduce((sum, s) => sum + s.total, 0), [orderShares]);
   const unsettledShareCount = orderShares.filter((s) => !s.settled).length;
   const hasUnpaidExpenses = unpaidExpenseCount > 0;
   const hasUnsettledShares = unsettledShareCount > 0;
-  const allSettled = !hasUnpaidExpenses && !hasUnsettledShares && orderShares.length > 0;
+  const allSettled = !hasUnpaidExpenses && !hasUnsettledShares && orderExpenses.length > 0 && orderShares.length > 0;
   const settlementNotStarted = orderExpenses.length === 0 && orderShares.length === 0;
+  const hasExpenses = orderExpenses.length > 0;
+  const hasShares = orderShares.length > 0;
 
   const profit = (currentOrder?.totalAmount || 0) - totalExpense - totalShare;
 
@@ -80,9 +119,6 @@ export default function Settlement() {
       o.family.contactName.includes(searchQuery) ||
       o.orderNo.includes(searchQuery)
   );
-
-  const schedules = useAppStore((s) => s.schedules);
-  const orderSchedules = schedules.filter((s) => s.orderId === selectedOrder);
 
   const calculateStaffShare = (staffId: string) => {
     const s = staff.find((x) => x.id === staffId);
@@ -106,6 +142,63 @@ export default function Settlement() {
         });
       }
     });
+  };
+
+  const handleAddExpense = () => {
+    if (selectedOrder && newExpense.item && newExpense.amount) {
+      addExpense({
+        orderId: selectedOrder,
+        category: newExpense.category,
+        item: newExpense.item,
+        amount: parseFloat(newExpense.amount),
+        paid: newExpense.paid,
+      });
+      setShowAddExpenseModal(false);
+      setNewExpense({ category: '服务费', item: '', amount: '', paid: false });
+    }
+  };
+
+  const handleToggleExpensePaid = (expenseId: string) => {
+    const exp = orderExpenses.find((e) => e.id === expenseId);
+    if (exp) {
+      updateExpense(expenseId, { paid: !exp.paid });
+    }
+  };
+
+  const handleToggleShareSettled = (shareId: string) => {
+    const share = orderShares.find((s) => s.id === shareId);
+    if (share) {
+      updateStaffShare(shareId, { settled: !share.settled });
+    }
+  };
+
+  const handleSettleAllShares = () => {
+    orderShares.forEach((share) => {
+      if (!share.settled) {
+        updateStaffShare(share.id, { settled: true });
+      }
+    });
+  };
+
+  const handleUnsettleAllShares = () => {
+    orderShares.forEach((share) => {
+      if (share.settled) {
+        updateStaffShare(share.id, { settled: false });
+      }
+    });
+  };
+
+  const getOrderSettlementStatus = (orderId: string) => {
+    const orderExps = expenses.filter((e) => e.orderId === orderId);
+    const orderShrs = staffShares.filter((s) => s.orderId === orderId);
+    const hasExp = orderExps.length > 0;
+    const hasShr = orderShrs.length > 0;
+    const allExpPaid = orderExps.every((e) => e.paid);
+    const allShrSettled = orderShrs.every((s) => s.settled);
+
+    if (!hasExp && !hasShr) return 'not-started';
+    if (hasExp && hasShr && allExpPaid && allShrSettled) return 'completed';
+    return 'in-progress';
   };
 
   return (
@@ -135,6 +228,11 @@ export default function Settlement() {
               <p className="text-xl font-bold text-cinnabar font-song">
                 {formatCurrency(totalExpense)}
               </p>
+              {hasExpenses && hasUnpaidExpenses && (
+                <p className="text-xs text-amber-600 mt-0.5">
+                  {unpaidExpenseCount} 项未付
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -148,6 +246,11 @@ export default function Settlement() {
               <p className="text-xl font-bold text-linen font-song">
                 {formatCurrency(totalShare)}
               </p>
+              {hasShares && hasUnsettledShares && (
+                <p className="text-xs text-amber-600 mt-0.5">
+                  {unsettledShareCount} 人未结
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -172,7 +275,7 @@ export default function Settlement() {
             <div>
               <p className="text-xs text-ink-500">待结算</p>
               <p className="text-xl font-bold text-ink-900 font-song">
-                {formatCurrency(totalShare - settledShare)}
+                {formatCurrency(totalExpense - paidExpense + totalShare - settledShare)}
               </p>
             </div>
           </div>
@@ -218,28 +321,7 @@ export default function Settlement() {
               const shareTotal = staffShares
                 .filter((s) => s.orderId === order.id)
                 .reduce((sum, s) => sum + s.total, 0);
-              const allSettled = staffShares
-                .filter((s) => s.orderId === order.id)
-                .every((s) => s.settled);
-              const orderHasExpenses = expenses.filter((e) => e.orderId === order.id).length > 0;
-              const orderHasShares = staffShares.filter((s) => s.orderId === order.id).length > 0;
-              const orderAllSettled = orderHasShares && staffShares
-                .filter((s) => s.orderId === order.id)
-                .every((s) => s.settled);
-              const orderHasUnpaidExpenses = expenses
-                .filter((e) => e.orderId === order.id)
-                .some((e) => !e.paid);
-
-              let settlementStatus: 'not-started' | 'in-progress' | 'completed' | 'needs-attention';
-              if (!orderHasExpenses && !orderHasShares) {
-                settlementStatus = 'not-started';
-              } else if (orderAllSettled && !orderHasUnpaidExpenses) {
-                settlementStatus = 'completed';
-              } else if (orderHasUnpaidExpenses || (orderHasShares && !orderAllSettled)) {
-                settlementStatus = 'in-progress';
-              } else {
-                settlementStatus = 'needs-attention';
-              }
+              const status = getOrderSettlementStatus(order.id);
 
               return (
                 <div
@@ -280,12 +362,12 @@ export default function Settlement() {
                     </div>
                     <div className="pt-2 mt-2 border-t border-ink-100 flex justify-between items-center">
                       <span className="text-ink-500">
-                        {settlementStatus === 'completed' ? (
+                        {status === 'completed' ? (
                           <span className="flex items-center gap-1 text-jade">
                             <CheckCircle2 className="w-3 h-3" strokeWidth={1.8} />
                             已结清
                           </span>
-                        ) : settlementStatus === 'not-started' ? (
+                        ) : status === 'not-started' ? (
                           <span className="flex items-center gap-1 text-ink-400">
                             <XCircle className="w-3 h-3" strokeWidth={1.8} />
                             未开始
@@ -377,15 +459,15 @@ export default function Settlement() {
                     <div className="space-y-1.5 text-sm text-ink-600">
                       <p className="flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-ink-400" />
+                        在「费用明细」Tab 中添加相关费用
+                      </p>
+                      <p className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-ink-400" />
                         请先确认排班记录是否完整
                       </p>
                       <p className="flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-ink-400" />
                         到「人员分账」Tab 点击「一键生成分账」
-                      </p>
-                      <p className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-ink-400" />
-                        在「费用明细」Tab 中添加相关费用
                       </p>
                     </div>
                   </div>
@@ -398,6 +480,12 @@ export default function Settlement() {
                   <div className="flex-1">
                     <p className="font-medium text-amber-800 mb-2">结算进行中，还差以下内容待处理：</p>
                     <div className="space-y-1.5 text-sm">
+                      {!hasExpenses && (
+                        <p className="flex items-center gap-2 text-amber-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                          尚未录入费用明细，请先添加费用
+                        </p>
+                      )}
                       {hasUnpaidExpenses && (
                         <p className="flex items-center gap-2 text-amber-700">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -405,10 +493,10 @@ export default function Settlement() {
                           （{formatCurrency(totalExpense - paidExpense)}）
                         </p>
                       )}
-                      {orderShares.length === 0 && (
+                      {!hasShares && (
                         <p className="flex items-center gap-2 text-amber-700">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                          尚未生成分账明细，请到「人员分账」Tab 一键生成
+                          尚未生成分账明细，请先到「人员分账」Tab 一键生成
                         </p>
                       )}
                       {hasUnsettledShares && (
@@ -445,7 +533,7 @@ export default function Settlement() {
                     ].map((tab) => (
                       <button
                         key={tab.key}
-                        onClick={() => setActiveTab(tab.key as typeof activeTab)}
+                        onClick={() => handleTabChange(tab.key as typeof activeTab)}
                         className={`tab-item flex items-center gap-2 py-3.5 ${
                           activeTab === tab.key ? 'tab-active' : ''
                         }`}
@@ -468,7 +556,8 @@ export default function Settlement() {
                   {activeTab === 'expenses' && (
                     <div className="space-y-6">
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                        {Object.entries(expenseByCategory).map(([cat, amount]) => {
+                        {expenseCategories.map((cat) => {
+                          const amount = expenseByCategory[cat] || 0;
                           const pct = totalExpense > 0 ? (amount / totalExpense) * 100 : 0;
                           return (
                             <div key={cat} className="p-3 rounded-lg bg-ink-50 border border-ink-100">
@@ -488,7 +577,10 @@ export default function Settlement() {
 
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-semibold text-ink-700">费用清单</h4>
-                        <button className="btn-ghost text-sm">
+                        <button
+                          onClick={() => setShowAddExpenseModal(true)}
+                          className="btn-gold text-sm"
+                        >
                           <Plus className="w-4 h-4" strokeWidth={1.8} />
                           添加费用
                         </button>
@@ -502,13 +594,14 @@ export default function Settlement() {
                               <th>费用项目</th>
                               <th>金额</th>
                               <th>支付状态</th>
+                              <th>操作</th>
                             </tr>
                           </thead>
                           <tbody>
                             {orderExpenses.map((exp) => (
                               <tr key={exp.id}>
                                 <td>
-                                  <span className="badge bg-ink-100 text-ink-700">
+                                  <span className={`badge ${categoryColors[exp.category]}`}>
                                     {exp.category}
                                   </span>
                                 </td>
@@ -517,20 +610,53 @@ export default function Settlement() {
                                   {formatCurrency(exp.amount)}
                                 </td>
                                 <td>
-                                  {exp.paid ? (
-                                    <span className="badge bg-jade/10 text-jade border-jade/30">
-                                      <CheckCircle2 className="w-3 h-3 mr-0.5" strokeWidth={1.8} />
-                                      已支付
-                                    </span>
-                                  ) : (
-                                    <span className="badge bg-amber-50 text-amber-700 border border-amber-200">
-                                      <Clock className="w-3 h-3 mr-0.5" strokeWidth={1.8} />
-                                      待支付
-                                    </span>
-                                  )}
+                                  <button
+                                    onClick={() => handleToggleExpensePaid(exp.id)}
+                                    className={`badge cursor-pointer transition-colors ${
+                                      exp.paid
+                                        ? 'bg-jade/10 text-jade border-jade/30 hover:bg-jade/20'
+                                        : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                                    }`}
+                                  >
+                                    {exp.paid ? (
+                                      <>
+                                        <CheckCircle2 className="w-3 h-3 mr-0.5" strokeWidth={1.8} />
+                                        已支付
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Clock className="w-3 h-3 mr-0.5" strokeWidth={1.8} />
+                                        待支付
+                                      </>
+                                    )}
+                                  </button>
+                                </td>
+                                <td>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      className="btn-ghost p-1.5 text-ink-400 hover:text-ink-600"
+                                      title="标记已支付/待支付"
+                                      onClick={() => handleToggleExpensePaid(exp.id)}
+                                    >
+                                      {exp.paid ? (
+                                        <RotateCcw className="w-4 h-4" strokeWidth={1.8} />
+                                      ) : (
+                                        <Check className="w-4 h-4" strokeWidth={1.8} />
+                                      )}
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
+                            {orderExpenses.length === 0 && (
+                              <tr>
+                                <td colSpan={5} className="text-center py-12 text-ink-400">
+                                  <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" strokeWidth={1.5} />
+                                  <p className="text-sm">暂无费用记录</p>
+                                  <p className="text-xs mt-1">点击右上角「添加费用」开始录入</p>
+                                </td>
+                              </tr>
+                            )}
                             <tr className="bg-ink-50/80">
                               <td colSpan={2} className="text-right font-semibold text-ink-800">
                                 费用合计
@@ -538,7 +664,7 @@ export default function Settlement() {
                               <td className="font-bold text-cinnabar">
                                 {formatCurrency(totalExpense)}
                               </td>
-                              <td>
+                              <td colSpan={2}>
                                 <p className="text-xs text-ink-500">
                                   已付 {formatCurrency(paidExpense)} / 未付 {formatCurrency(totalExpense - paidExpense)}
                                 </p>
@@ -560,7 +686,7 @@ export default function Settlement() {
                             <div>
                               <p className="font-medium text-amber-800">可自动生成分账</p>
                               <p className="text-sm text-amber-700">
-                                根据排班记录和人员日薪，已为 {orderSchedules.length} 人次计算分账
+                                根据排班记录和人员日薪，为 {orderSchedules.length} 人次计算分账
                               </p>
                             </div>
                           </div>
@@ -571,12 +697,45 @@ export default function Settlement() {
                         </div>
                       )}
 
+                      {orderSchedules.length === 0 && (
+                        <div className="p-4 rounded-lg bg-ink-50 border border-ink-200 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Users className="w-5 h-5 text-ink-500" strokeWidth={1.8} />
+                            <div>
+                              <p className="font-medium text-ink-700">暂无排班记录</p>
+                              <p className="text-sm text-ink-500">
+                                请先到执事排班页面为该订单安排人员
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => navigate(`/scheduling?orderId=${selectedOrder}`)}
+                            className="btn-outline text-sm"
+                          >
+                            去排班
+                          </button>
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-semibold text-ink-700">人员分账明细</h4>
-                        <button className="btn-gold text-sm">
-                          <CheckCircle2 className="w-4 h-4" strokeWidth={1.8} />
-                          一键标记结清
-                        </button>
+                        {orderShares.length > 0 && (
+                          <div className="flex gap-2">
+                            {hasUnsettledShares ? (
+                              <button onClick={handleSettleAllShares} className="btn-gold text-sm">
+                                <CheckCircle2 className="w-4 h-4" strokeWidth={1.8} />
+                                一键全部结清
+                              </button>
+                            ) : (
+                              allSettled && (
+                                <button onClick={handleUnsettleAllShares} className="btn-outline text-sm">
+                                  <RotateCcw className="w-4 h-4" strokeWidth={1.8} />
+                                  全部改为待结算
+                                </button>
+                              )
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -601,15 +760,16 @@ export default function Settlement() {
                                   <div>
                                     <div className="flex items-center gap-2">
                                       <h5 className="font-semibold text-ink-900">{s.name}</h5>
-                                      {share.settled ? (
-                                        <span className="badge bg-jade/10 text-jade border-jade/30">
-                                          已结清
-                                        </span>
-                                      ) : (
-                                        <span className="badge bg-amber-50 text-amber-700 border border-amber-200">
-                                          待结算
-                                        </span>
-                                      )}
+                                      <button
+                                        onClick={() => handleToggleShareSettled(share.id)}
+                                        className={`badge cursor-pointer transition-colors ${
+                                          share.settled
+                                            ? 'bg-jade/10 text-jade border-jade/30 hover:bg-jade/20'
+                                            : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                                        }`}
+                                      >
+                                        {share.settled ? '已结清' : '待结算'}
+                                      </button>
                                     </div>
                                     <p className="text-xs text-ink-500">{s.role} · {s.phone}</p>
                                   </div>
@@ -657,26 +817,32 @@ export default function Settlement() {
                                 </div>
                               </div>
 
-                              {!share.settled && (
-                                <div className="mt-4 pt-3 border-t border-ink-100 flex justify-end">
-                                  <button
-                                    onClick={() =>
-                                      updateStaffShare(share.id, { settled: true })
-                                    }
-                                    className="btn-linen text-sm"
-                                  >
-                                    <CheckCircle2 className="w-4 h-4" strokeWidth={1.8} />
-                                    确认结算
-                                  </button>
-                                </div>
-                              )}
+                              <div className="mt-4 pt-3 border-t border-ink-100 flex justify-between items-center">
+                                <span className="text-xs text-ink-500">
+                                  排班 {orderSchedules.filter(x => x.staffId === share.staffId).length} 个班次
+                                </span>
+                                <button
+                                  onClick={() => handleToggleShareSettled(share.id)}
+                                  className={`text-sm font-medium ${
+                                    share.settled
+                                      ? 'text-ink-500 hover:text-ink-700'
+                                      : 'text-linen hover:text-linen-dark'
+                                  }`}
+                                >
+                                  {share.settled ? '改为待结算' : '确认结算'}
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
                         {orderShares.length === 0 && (
                           <div className="col-span-2 text-center py-12 text-ink-400 border-2 border-dashed border-ink-200 rounded-xl">
                             <Users className="w-12 h-12 mx-auto mb-3 opacity-30" strokeWidth={1.5} />
-                            <p className="text-sm">点击上方「一键生成分账」按钮，根据排班自动计算</p>
+                            <p className="text-sm">
+                              {orderSchedules.length > 0
+                                ? '点击上方「一键生成分账」按钮，根据排班自动计算'
+                                : '请先安排排班，再生成分账'}
+                            </p>
                           </div>
                         )}
                       </div>
@@ -702,6 +868,9 @@ export default function Settlement() {
                                   {formatCurrency(totalShare - settledShare)}
                                 </span>
                               </p>
+                              <p className="text-xs text-ink-500 mt-1">
+                                {unsettledShareCount} 人待结算
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -720,6 +889,99 @@ export default function Settlement() {
           )}
         </div>
       </div>
+
+      {/* 添加费用弹窗 */}
+      {showAddExpenseModal && (
+        <div className="fixed inset-0 bg-ink-900/50 flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-slide-up">
+            <div className="p-5 border-b border-ink-100 flex items-center justify-between">
+              <h3 className="font-song text-lg font-semibold text-ink-900">添加费用</h3>
+              <button
+                onClick={() => setShowAddExpenseModal(false)}
+                className="p-1 rounded-md hover:bg-ink-100 text-ink-400"
+              >
+                <X className="w-5 h-5" strokeWidth={1.8} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-2">
+                  费用类别
+                </label>
+                <div className="grid grid-cols-5 gap-2">
+                  {expenseCategories.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setNewExpense({ ...newExpense, category: cat })}
+                      className={`p-2 rounded-lg border-2 text-xs font-medium transition-all ${
+                        newExpense.category === cat
+                          ? 'border-gold bg-gold-50 text-gold-dark'
+                          : 'border-ink-200 text-ink-500 hover:border-ink-300'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-2">
+                  费用项目
+                </label>
+                <input
+                  type="text"
+                  value={newExpense.item}
+                  onChange={(e) => setNewExpense({ ...newExpense, item: e.target.value })}
+                  className="input-base"
+                  placeholder="例如：豪华寿衣、灵堂租赁等"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-2">
+                  金额（元）
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">¥</span>
+                  <input
+                    type="number"
+                    value={newExpense.amount}
+                    onChange={(e) => setNewExpense({ ...newExpense, amount: e.target.value })}
+                    className="input-base pl-7"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newExpense.paid}
+                    onChange={(e) => setNewExpense({ ...newExpense, paid: e.target.checked })}
+                    className="w-4 h-4 rounded border-ink-300 text-gold focus:ring-gold"
+                  />
+                  <span className="text-sm text-ink-700">已支付</span>
+                </label>
+              </div>
+            </div>
+            <div className="p-5 border-t border-ink-100 flex justify-end gap-2">
+              <button
+                onClick={() => setShowAddExpenseModal(false)}
+                className="btn-outline"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleAddExpense}
+                disabled={!newExpense.item || !newExpense.amount}
+                className="btn-gold"
+              >
+                <Plus className="w-4 h-4" strokeWidth={1.8} />
+                添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
