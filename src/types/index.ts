@@ -161,6 +161,18 @@ export interface Expense {
   paid: boolean;
 }
 
+export type PaymentMethod = '现金' | '微信' | '支付宝' | '银行转账' | '其他';
+
+export interface Payment {
+  id: string;
+  orderId: string;
+  amount: number;
+  method: PaymentMethod;
+  date: string;
+  remark?: string;
+  operator: string;
+}
+
 export interface StaffShare {
   id: string;
   orderId: string;
@@ -169,6 +181,10 @@ export interface StaffShare {
   bonus: number;
   total: number;
   settled: boolean;
+  paidOut: boolean;
+  paidMethod?: string;
+  paidDate?: string;
+  paidOperator?: string;
 }
 
 export interface DashboardStats {

@@ -10,6 +10,7 @@ import type {
   Communication,
   Expense,
   StaffShare,
+  Payment,
   DashboardStats,
 } from '../types';
 import {
@@ -23,6 +24,7 @@ import {
   mockCommunications,
   mockExpenses,
   mockStaffShares,
+  mockPayments,
 } from '../data/mockData';
 import { loadFromStorage, saveToStorage, generateId, generateOrderNo } from '../utils/storage';
 
@@ -37,6 +39,7 @@ interface AppState {
   communications: Communication[];
   expenses: Expense[];
   staffShares: StaffShare[];
+  payments: Payment[];
 
   addOrder: (order: Omit<FuneralOrder, 'id' | 'orderNo' | 'createdAt'>) => FuneralOrder;
   updateOrderStatus: (orderId: string, status: FuneralOrder['status']) => void;
@@ -49,6 +52,7 @@ interface AppState {
   updateExpense: (expenseId: string, updates: Partial<Expense>) => void;
   addStaffShare: (share: Omit<StaffShare, 'id'>) => void;
   updateStaffShare: (shareId: string, updates: Partial<StaffShare>) => void;
+  addPayment: (payment: Omit<Payment, 'id'>) => void;
   updateMaterialStock: (materialId: string, change: number, operator: string, notes?: string) => void;
   getOrderById: (orderId: string) => FuneralOrder | undefined;
   getStaffById: (staffId: string) => Staff | undefined;
@@ -66,6 +70,7 @@ export const useAppStore = create<AppState>((set, get) => {
   const storedComms = loadFromStorage('funeral_communications', mockCommunications);
   const storedExpenses = loadFromStorage('funeral_expenses', mockExpenses);
   const storedShares = loadFromStorage('funeral_shares', mockStaffShares);
+  const storedPayments = loadFromStorage('funeral_payments', mockPayments);
 
   return {
     orders: storedOrders,
@@ -78,6 +83,7 @@ export const useAppStore = create<AppState>((set, get) => {
     communications: storedComms,
     expenses: storedExpenses,
     staffShares: storedShares,
+    payments: storedPayments,
 
     addOrder: (orderData) => {
       const newOrder: FuneralOrder = {
@@ -199,6 +205,18 @@ export const useAppStore = create<AppState>((set, get) => {
         );
         saveToStorage('funeral_shares', staffShares);
         return { staffShares };
+      });
+    },
+
+    addPayment: (paymentData) => {
+      const newPayment: Payment = {
+        ...paymentData,
+        id: `pay-${generateId()}`,
+      };
+      set((state) => {
+        const payments = [...state.payments, newPayment];
+        saveToStorage('funeral_payments', payments);
+        return { payments };
       });
     },
 

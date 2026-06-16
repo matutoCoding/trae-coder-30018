@@ -28,6 +28,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Receipt,
+  Banknote,
 } from 'lucide-react';
 
 const methodIcons = {
@@ -45,7 +46,7 @@ const methodColors = {
 export default function OrderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { orders, communications, schedules, staff, materials, bandSchedules, bands, expenses, staffShares, addCommunication } = useAppStore();
+  const { orders, communications, schedules, staff, materials, bandSchedules, bands, expenses, staffShares, payments, addCommunication } = useAppStore();
   const [expandedSection, setExpandedSection] = useState<string | null>('deceased');
   const [showAddComm, setShowAddComm] = useState(false);
   const [newComm, setNewComm] = useState<{
@@ -67,6 +68,7 @@ export default function OrderDetail() {
   const orderSchedules = schedules.filter((s) => s.orderId === id);
   const orderExpenses = expenses.filter((e) => e.orderId === id);
   const orderShares = staffShares.filter((s) => s.orderId === id);
+  const orderPayments = payments.filter((p) => p.orderId === id);
   const orderBands = bandSchedules.filter((b) => b.orderId === id);
 
   const totalExpense = orderExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -74,11 +76,16 @@ export default function OrderDetail() {
   const unpaidExpenseCount = orderExpenses.filter((e) => !e.paid).length;
   const totalShare = orderShares.reduce((sum, s) => sum + s.total, 0);
   const settledShare = orderShares.filter((s) => s.settled).reduce((sum, s) => sum + s.total, 0);
+  const paidOutShare = orderShares.filter((s) => s.paidOut).reduce((sum, s) => sum + s.total, 0);
   const unsettledShareCount = orderShares.filter((s) => !s.settled).length;
+  const unpaidOutCount = orderShares.filter((s) => s.settled && !s.paidOut).length;
+  const totalReceived = orderPayments.reduce((sum, p) => sum + p.amount, 0);
+  const totalUnreceived = Math.max(0, (order?.totalAmount || 0) - totalReceived);
   const hasExpenses = orderExpenses.length > 0;
   const hasShares = orderShares.length > 0;
-  const allSettled = hasExpenses && hasShares && unpaidExpenseCount === 0 && unsettledShareCount === 0;
-  const settlementNotStarted = !hasExpenses && !hasShares;
+  const hasPayments = orderPayments.length > 0;
+  const allSettled = hasExpenses && hasShares && unpaidExpenseCount === 0 && unsettledShareCount === 0 && unpaidOutCount === 0;
+  const settlementNotStarted = !hasExpenses && !hasShares && !hasPayments;
   const profit = (order?.totalAmount || 0) - totalExpense - totalShare;
 
   const toggleSection = (section: string) => {
@@ -194,7 +201,7 @@ export default function OrderDetail() {
           <div className="flex-1">
             <p className="font-medium text-jade">本单已全部结清 ✓</p>
             <p className="text-sm text-ink-500">
-              所有 {orderExpenses.length} 项费用已支付，{orderShares.length} 位人员分账已确认
+              所有 {orderExpenses.length} 项费用已支付，{orderShares.length} 位人员分账已确认且已发放
             </p>
           </div>
           <button
@@ -212,22 +219,12 @@ export default function OrderDetail() {
           <div className="flex-1">
             <p className="font-medium text-ink-700 mb-1">尚未开始结算</p>
             <div className="space-y-1 text-sm text-ink-600">
-              <p className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-ink-400" />
-                请先录入费用明细
-              </p>
-              <p className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-ink-400" />
-                确认排班后生成分账
-              </p>
+              <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-ink-400" />请先录入费用明细</p>
+              <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-ink-400" />登记家属收款</p>
+              <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-ink-400" />确认排班后生成分账</p>
             </div>
           </div>
-          <button
-            onClick={() => navigate(`/settlement?orderId=${order.id}&tab=expenses`)}
-            className="btn-gold text-sm flex-shrink-0"
-          >
-            开始结算
-          </button>
+          <button onClick={() => navigate(`/settlement?orderId=${order.id}&tab=expenses`)} className="btn-gold text-sm flex-shrink-0">开始结算</button>
         </div>
       ) : (
         <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3">
@@ -237,40 +234,15 @@ export default function OrderDetail() {
           <div className="flex-1">
             <p className="font-medium text-amber-800 mb-1">结算进行中</p>
             <div className="space-y-1 text-sm text-amber-700">
-              {!hasExpenses && (
-                <p className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  尚未录入费用明细
-                </p>
-              )}
-              {unpaidExpenseCount > 0 && (
-                <p className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  还有 {unpaidExpenseCount} 项费用未支付
-                  （{formatCurrency(totalExpense - paidExpense)}）
-                </p>
-              )}
-              {!hasShares && (
-                <p className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  尚未生成分账明细
-                </p>
-              )}
-              {unsettledShareCount > 0 && (
-                <p className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  还有 {unsettledShareCount} 位人员分账未确认
-                  （{formatCurrency(totalShare - settledShare)}）
-                </p>
-              )}
+              {!hasExpenses && <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />尚未录入费用明细</p>}
+              {unpaidExpenseCount > 0 && <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />还有 {unpaidExpenseCount} 项费用未支付（{formatCurrency(totalExpense - paidExpense)}）</p>}
+              {!hasShares && <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />尚未生成分账明细</p>}
+              {unsettledShareCount > 0 && <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />还有 {unsettledShareCount} 位人员分账未确认（{formatCurrency(totalShare - settledShare)}）</p>}
+              {unpaidOutCount > 0 && <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />还有 {unpaidOutCount} 位人员待发放（{formatCurrency(settledShare - paidOutShare)}）</p>}
+              {totalUnreceived > 0 && <p className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />家属还有 {formatCurrency(totalUnreceived)} 未收款</p>}
             </div>
           </div>
-          <button
-            onClick={() => navigate(`/settlement?orderId=${order.id}`)}
-            className="btn-gold text-sm flex-shrink-0"
-          >
-            去处理
-          </button>
+          <button onClick={() => navigate(`/settlement?orderId=${order.id}`)} className="btn-gold text-sm flex-shrink-0">去处理</button>
         </div>
       )}
 
@@ -484,76 +456,64 @@ export default function OrderDetail() {
           <div className="card p-5 bg-gradient-to-br from-gold-50/50 to-amber-50/50 border-gold/20">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-song text-lg font-semibold text-ink-900">财务概览</h3>
-              <button
-                onClick={() => navigate(`/settlement?orderId=${order.id}`)}
-                className="text-xs text-gold-dark hover:underline"
-              >
-                查看结算 →
-              </button>
+              <button onClick={() => navigate(`/settlement?orderId=${order.id}`)} className="text-xs text-gold-dark hover:underline">查看结算 →</button>
             </div>
 
             <div className="mb-3">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-ink-600">订单金额</span>
-                <span className="font-song text-xl font-bold text-gold-dark">
-                  {formatCurrency(order.totalAmount || 0)}
-                </span>
+                <span className="font-song text-xl font-bold text-gold-dark">{formatCurrency(order.totalAmount || 0)}</span>
+              </div>
+            </div>
+
+            {/* 收款进度 */}
+            <div onClick={() => navigate(`/settlement?orderId=${order.id}&tab=payments`)}
+              className="p-3 mb-3 rounded-lg bg-white/60 hover:bg-white cursor-pointer transition-colors border border-ink-100 hover:border-jade/30">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm text-ink-600 flex items-center gap-1.5"><Banknote className="w-4 h-4 text-jade" strokeWidth={1.8} />收款进度</span>
+                <span className="text-lg font-semibold text-jade">{formatCurrency(totalReceived)}</span>
+              </div>
+              <div className="h-1.5 bg-ink-100 rounded-full overflow-hidden mb-1.5">
+                <div className="h-full bg-gradient-to-r from-jade to-jade-dark rounded-full transition-all"
+                  style={{ width: order.totalAmount && order.totalAmount > 0 ? `${Math.min(100, (totalReceived / order.totalAmount) * 100)}%` : '0%' }} />
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-jade">已收 {formatCurrency(totalReceived)}</span>
+                <span className={totalUnreceived > 0 ? 'text-cinnabar' : 'text-ink-400'}>{totalUnreceived > 0 ? `未收 ${formatCurrency(totalUnreceived)}` : '已收齐'}</span>
               </div>
             </div>
 
             {/* 费用支出 */}
-            <div
-              onClick={() => navigate(`/settlement?orderId=${order.id}&tab=expenses`)}
-              className="p-3 mb-3 rounded-lg bg-white/60 hover:bg-white cursor-pointer transition-colors border border-ink-100 hover:border-gold/30"
-            >
+            <div onClick={() => navigate(`/settlement?orderId=${order.id}&tab=expenses`)}
+              className="p-3 mb-3 rounded-lg bg-white/60 hover:bg-white cursor-pointer transition-colors border border-ink-100 hover:border-gold/30">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-ink-600 flex items-center gap-1.5">
-                  <Receipt className="w-4 h-4 text-cinnabar" strokeWidth={1.8} />
-                  费用支出
-                </span>
-                <span className="text-lg font-semibold text-cinnabar">
-                  {formatCurrency(totalExpense)}
-                </span>
+                <span className="text-sm text-ink-600 flex items-center gap-1.5"><Receipt className="w-4 h-4 text-cinnabar" strokeWidth={1.8} />费用支出</span>
+                <span className="text-lg font-semibold text-cinnabar">{formatCurrency(totalExpense)}</span>
               </div>
               <div className="h-1.5 bg-ink-100 rounded-full overflow-hidden mb-1.5">
-                <div
-                  className="h-full bg-cinnabar rounded-full transition-all"
-                  style={{ width: order.totalAmount && order.totalAmount > 0 ? `${Math.min(100, (totalExpense / order.totalAmount) * 100)}%` : '0%' }}
-                />
+                <div className="h-full bg-cinnabar rounded-full transition-all"
+                  style={{ width: order.totalAmount && order.totalAmount > 0 ? `${Math.min(100, (totalExpense / order.totalAmount) * 100)}%` : '0%' }} />
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-jade">已付 {formatCurrency(paidExpense)}</span>
-                <span className={unpaidExpenseCount > 0 ? 'text-amber-600' : 'text-ink-400'}>
-                  {unpaidExpenseCount > 0 ? `${unpaidExpenseCount} 项未付` : '已付清'}
-                </span>
+                <span className={unpaidExpenseCount > 0 ? 'text-amber-600' : 'text-ink-400'}>{unpaidExpenseCount > 0 ? `${unpaidExpenseCount} 项未付` : '已付清'}</span>
               </div>
             </div>
 
             {/* 人员分账 */}
-            <div
-              onClick={() => navigate(`/settlement?orderId=${order.id}&tab=shares`)}
-              className="p-3 mb-3 rounded-lg bg-white/60 hover:bg-white cursor-pointer transition-colors border border-ink-100 hover:border-linen/30"
-            >
+            <div onClick={() => navigate(`/settlement?orderId=${order.id}&tab=shares`)}
+              className="p-3 mb-3 rounded-lg bg-white/60 hover:bg-white cursor-pointer transition-colors border border-ink-100 hover:border-linen/30">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-ink-600 flex items-center gap-1.5">
-                  <Users className="w-4 h-4 text-linen" strokeWidth={1.8} />
-                  人员分账
-                </span>
-                <span className="text-lg font-semibold text-linen">
-                  {formatCurrency(totalShare)}
-                </span>
+                <span className="text-sm text-ink-600 flex items-center gap-1.5"><Users className="w-4 h-4 text-linen" strokeWidth={1.8} />人员分账</span>
+                <span className="text-lg font-semibold text-linen">{formatCurrency(totalShare)}</span>
               </div>
               <div className="h-1.5 bg-ink-100 rounded-full overflow-hidden mb-1.5">
-                <div
-                  className="h-full bg-linen rounded-full transition-all"
-                  style={{ width: order.totalAmount && order.totalAmount > 0 ? `${Math.min(100, (totalShare / order.totalAmount) * 100)}%` : '0%' }}
-                />
+                <div className="h-full bg-linen rounded-full transition-all"
+                  style={{ width: order.totalAmount && order.totalAmount > 0 ? `${Math.min(100, (totalShare / order.totalAmount) * 100)}%` : '0%' }} />
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-jade">已结 {formatCurrency(settledShare)}</span>
-                <span className={unsettledShareCount > 0 ? 'text-amber-600' : 'text-ink-400'}>
-                  {!hasShares ? '未生成分账' : unsettledShareCount > 0 ? `${unsettledShareCount} 人未结` : '已结清'}
-                </span>
+                <span className="text-jade">已发 {formatCurrency(paidOutShare)}</span>
+                <span className={!hasShares ? 'text-ink-400' : unpaidOutCount > 0 ? 'text-amber-600' : 'text-ink-400'}>{!hasShares ? '未生成分账' : unpaidOutCount > 0 ? `${unpaidOutCount} 人待发放` : '已发放'}</span>
               </div>
             </div>
 
@@ -561,22 +521,11 @@ export default function OrderDetail() {
             <div className="pt-3 mt-3 border-t border-gold/20">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-ink-700 font-medium">预估利润</span>
-                <span
-                  className={`font-song text-xl font-bold ${
-                    profit >= 0 ? 'text-jade' : 'text-cinnabar'
-                  }`}
-                >
-                  {profit >= 0 ? '+' : ''}
-                  {formatCurrency(profit)}
-                </span>
+                <span className={`font-song text-xl font-bold ${profit >= 0 ? 'text-jade' : 'text-cinnabar'}`}>{profit >= 0 ? '+' : ''}{formatCurrency(profit)}</span>
               </div>
               <div className="flex justify-between text-xs text-ink-400 mt-1">
                 <span>总收入 - 费用 - 分账</span>
-                <span>
-                  {order.totalAmount && order.totalAmount > 0
-                    ? `${((profit / order.totalAmount) * 100).toFixed(1)}% 利润率`
-                    : '—'}
-                </span>
+                <span>{order.totalAmount && order.totalAmount > 0 ? `${((profit / order.totalAmount) * 100).toFixed(1)}% 利润率` : '—'}</span>
               </div>
             </div>
           </div>

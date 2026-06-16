@@ -1,4 +1,4 @@
-import type { FuneralOrder, Staff, Material, RitualTemplate, Band, Communication, Expense, StaffShare, Schedule, BandScheduleItem } from '../types';
+import type { FuneralOrder, Staff, Material, RitualTemplate, Band, Communication, Expense, StaffShare, Schedule, BandScheduleItem, Payment } from '../types';
 
 const now = new Date();
 
@@ -512,14 +512,21 @@ export const mockExpenses: Expense[] = [
 ];
 
 export const mockStaffShares: StaffShare[] = [
-  { id: 'share-003', orderId: 'order-003', staffId: 'staff-002', baseAmount: 1200, bonus: 0, total: 1200, settled: true },
-  { id: 'share-004', orderId: 'order-003', staffId: 'staff-004', baseAmount: 760, bonus: 0, total: 760, settled: true },
-  { id: 'share-005', orderId: 'order-003', staffId: 'staff-005', baseAmount: 500, bonus: 100, total: 600, settled: true },
-  { id: 'share-006', orderId: 'order-003', staffId: 'staff-006', baseAmount: 500, bonus: 100, total: 600, settled: true },
-  { id: 'share-007', orderId: 'order-003', staffId: 'staff-007', baseAmount: 500, bonus: 0, total: 500, settled: true },
-  { id: 'share-008', orderId: 'order-003', staffId: 'staff-011', baseAmount: 500, bonus: 0, total: 500, settled: true },
-  { id: 'share-009', orderId: 'order-003', staffId: 'staff-012', baseAmount: 500, bonus: 0, total: 500, settled: true },
-  { id: 'share-010', orderId: 'order-003', staffId: 'staff-010', baseAmount: 400, bonus: 0, total: 400, settled: true },
-  { id: 'share-001', orderId: 'order-001', staffId: 'staff-001', baseAmount: 1600, bonus: 200, total: 1800, settled: false },
-  { id: 'share-002', orderId: 'order-001', staffId: 'staff-003', baseAmount: 800, bonus: 0, total: 800, settled: false },
+  { id: 'share-003', orderId: 'order-003', staffId: 'staff-002', baseAmount: 1200, bonus: 0, total: 1200, settled: true, paidOut: true, paidMethod: '微信', paidDate: '2026-06-12', paidOperator: '周师傅' },
+  { id: 'share-004', orderId: 'order-003', staffId: 'staff-004', baseAmount: 760, bonus: 0, total: 760, settled: true, paidOut: true, paidMethod: '现金', paidDate: '2026-06-12', paidOperator: '周师傅' },
+  { id: 'share-005', orderId: 'order-003', staffId: 'staff-005', baseAmount: 500, bonus: 100, total: 600, settled: true, paidOut: true, paidMethod: '微信', paidDate: '2026-06-12', paidOperator: '周师傅' },
+  { id: 'share-006', orderId: 'order-003', staffId: 'staff-006', baseAmount: 500, bonus: 100, total: 600, settled: true, paidOut: false },
+  { id: 'share-007', orderId: 'order-003', staffId: 'staff-007', baseAmount: 500, bonus: 0, total: 500, settled: true, paidOut: false },
+  { id: 'share-008', orderId: 'order-003', staffId: 'staff-011', baseAmount: 500, bonus: 0, total: 500, settled: true, paidOut: false },
+  { id: 'share-009', orderId: 'order-003', staffId: 'staff-012', baseAmount: 500, bonus: 0, total: 500, settled: true, paidOut: false },
+  { id: 'share-010', orderId: 'order-003', staffId: 'staff-010', baseAmount: 400, bonus: 0, total: 400, settled: true, paidOut: false },
+  { id: 'share-001', orderId: 'order-001', staffId: 'staff-001', baseAmount: 1600, bonus: 200, total: 1800, settled: false, paidOut: false },
+  { id: 'share-002', orderId: 'order-001', staffId: 'staff-003', baseAmount: 800, bonus: 0, total: 800, settled: false, paidOut: false },
+];
+
+export const mockPayments: Payment[] = [
+  { id: 'pay-001', orderId: 'order-001', amount: 20000, method: '银行转账', date: '2026-06-14T10:00:00', remark: '首付款', operator: '周师傅' },
+  { id: 'pay-002', orderId: 'order-001', amount: 10000, method: '微信', date: '2026-06-15T14:30:00', remark: '中期款', operator: '周师傅' },
+  { id: 'pay-003', orderId: 'order-002', amount: 50000, method: '银行转账', date: '2026-06-12T16:00:00', remark: '全款预付', operator: '李师傅' },
+  { id: 'pay-004', orderId: 'order-003', amount: 35000, method: '现金', date: '2026-06-10T09:00:00', remark: '首付', operator: '周师傅' },
 ];
