@@ -9,7 +9,8 @@ import {
   TrendingDown, Receipt, PiggyBank, CheckCircle2, Clock,
   ChevronRight, User, Award, Share2, Wallet, Download,
   AlertCircle, XCircle, X, Check, RotateCcw, Banknote,
-  HandCoins, Filter,
+  HandCoins, Filter, FileSpreadsheet, Printer, Calendar,
+  ChevronUp, ChevronDown, ExternalLink,
 } from 'lucide-react';
 
 const expenseCategories: ExpenseCategory[] = ['服务费', '物资费', '乐队费', '场地费', '其他'];
@@ -28,7 +29,7 @@ const methodIcons: Record<PaymentMethod, string> = {
   '现金': '💵', '微信': '💚', '支付宝': '💙', '银行转账': '🏦', '其他': '💰',
 };
 
-type SettlementTab = 'expenses' | 'shares' | 'payments';
+type SettlementTab = 'expenses' | 'shares' | 'payments' | 'monthly';
 
 export default function Settlement() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -44,7 +45,9 @@ export default function Settlement() {
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [showPayoutModal, setShowPayoutModal] = useState<string | null>(null);
+  const [showStatementModal, setShowStatementModal] = useState(false);
   const [shareFilter, setShareFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
 
   const [newExpense, setNewExpense] = useState({
     category: '服务费' as ExpenseCategory, item: '', amount: '', paid: false,
@@ -61,7 +64,7 @@ export default function Settlement() {
     const tabFromUrl = searchParams.get('tab');
     if (orderIdFromUrl && orders.find((o) => o.id === orderIdFromUrl)) {
       setSelectedOrder(orderIdFromUrl);
-      if (['expenses', 'shares', 'payments'].includes(tabFromUrl || '')) {
+      if (['expenses', 'shares', 'payments', 'monthly'].includes(tabFromUrl || '')) {
         setActiveTab(tabFromUrl as SettlementTab);
       }
     } else if (!selectedOrder && orders.length > 0) {
@@ -108,7 +111,7 @@ export default function Settlement() {
   const hasExpenses = orderExpenses.length > 0;
   const hasShares = orderShares.length > 0;
   const hasPayments = orderPayments.length > 0;
-  const allSettled = !hasUnpaidExpenses && !hasUnsettledShares && hasExpenses && hasShares && unpaidOutCount === 0;
+  const allSettled = !hasUnpaidExpenses && !hasUnsettledShares && hasExpenses && hasShares && unpaidOutCount === 0 && totalUnreceived === 0;
   const settlementNotStarted = !hasExpenses && !hasShares && !hasPayments;
   const profit = orderTotalAmount - totalExpense - totalShare;
 
@@ -127,12 +130,25 @@ export default function Settlement() {
     return orderShares;
   }, [orderShares, shareFilter]);
 
-  const handleGenerateShares = () => {
-    const staffScheduleMap = new Map<string, number>();
+  const staffScheduleMap = useMemo(() => {
+    const m = new Map<string, number>();
     orderSchedules.forEach((sched) => {
-      const count = staffScheduleMap.get(sched.staffId) || 0;
-      staffScheduleMap.set(sched.staffId, count + 1);
+      const count = m.get(sched.staffId) || 0;
+      m.set(sched.staffId, count + 1);
     });
+    return m;
+  }, [orderSchedules]);
+
+  const newStaffsCount = useMemo(() => {
+    let cnt = 0;
+    staffScheduleMap.forEach((_count, staffId) => {
+      if (!orderShares.some((s) => s.staffId === staffId)) cnt++;
+    });
+    return cnt;
+  }, [staffScheduleMap, orderShares]);
+
+  const handleGenerateShares = () => {
+    let added = 0;
     staffScheduleMap.forEach((scheduleCount, staffId) => {
       const alreadyExists = orderShares.some((s) => s.staffId === staffId);
       if (!alreadyExists) {
@@ -148,9 +164,13 @@ export default function Settlement() {
             settled: false,
             paidOut: false,
           });
+          added++;
         }
       }
     });
+    if (added === 0) {
+      alert('没有需要补充的人员，所有排班人员都已生成分账。');
+    }
   };
 
   const handleAddExpense = () => {
@@ -226,14 +246,100 @@ export default function Settlement() {
   const getOrderSettlementStatus = (orderId: string) => {
     const orderExps = expenses.filter((e) => e.orderId === orderId);
     const orderShrs = staffShares.filter((s) => s.orderId === orderId);
+    const orderPays = payments.filter((p) => p.orderId === orderId);
+    const order = orders.find((o) => o.id === orderId);
+    const oTotal = order?.totalAmount || 0;
+    const oReceived = orderPays.reduce((s, p) => s + p.amount, 0);
     const hasExp = orderExps.length > 0;
     const hasShr = orderShrs.length > 0;
     const allExpPaid = orderExps.every((e) => e.paid);
     const allShrSettled = orderShrs.every((s) => s.settled);
     const allPaidOut = orderShrs.filter((s) => s.settled).every((s) => s.paidOut);
-    if (!hasExp && !hasShr) return 'not-started';
-    if (hasExp && hasShr && allExpPaid && allShrSettled && allPaidOut) return 'completed';
+    const allReceived = oReceived >= oTotal;
+    if (!hasExp && !hasShr && orderPays.length === 0) return 'not-started';
+    if (hasExp && hasShr && allExpPaid && allShrSettled && allPaidOut && allReceived) return 'completed';
     return 'in-progress';
+  };
+
+  const monthlyData = useMemo(() => {
+    const monthMap = new Map<string, {
+      orders: typeof orders;
+      totalAmount: number;
+      totalExpense: number;
+      totalPayout: number;
+      totalReceived: number;
+      totalUnreceived: number;
+      profit: number;
+    }>();
+
+    orders.forEach((order) => {
+      const d = new Date(order.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const orderExp = expenses.filter((e) => e.orderId === order.id).reduce((s, e) => s + e.amount, 0);
+      const orderPayout = staffShares.filter((s) => s.orderId === order.id && s.paidOut).reduce((s, s2) => s + s2.total, 0);
+      const orderRec = payments.filter((p) => p.orderId === order.id).reduce((s, p) => s + p.amount, 0);
+      const orderAmt = order.totalAmount || 0;
+      const orderProfit = orderAmt - orderExp - orderPayout;
+
+      if (!monthMap.has(key)) {
+        monthMap.set(key, { orders: [], totalAmount: 0, totalExpense: 0, totalPayout: 0, totalReceived: 0, totalUnreceived: 0, profit: 0 });
+      }
+      const m = monthMap.get(key)!;
+      m.orders.push(order);
+      m.totalAmount += orderAmt;
+      m.totalExpense += orderExp;
+      m.totalPayout += orderPayout;
+      m.totalReceived += orderRec;
+      m.totalUnreceived += Math.max(0, orderAmt - orderRec);
+      m.profit += orderProfit;
+    });
+
+    return Array.from(monthMap.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([month, data]) => ({ month, ...data }));
+  }, [orders, expenses, staffShares, payments]);
+
+  const exportToCSV = (type: 'payment' | 'payout') => {
+    if (!currentOrder) return;
+    let csv = '';
+    if (type === 'payment') {
+      csv = '\ufeff';
+      csv += '治丧结算单\n';
+      csv += `订单号,${currentOrder.orderNo}\n`;
+      csv += `逝者,${currentOrder.deceased.name}\n`;
+      csv += `家属,${currentOrder.family.contactName}（${currentOrder.family.relationship}）\n`;
+      csv += `联系电话,${currentOrder.family.phone}\n`;
+      csv += `订单金额,${formatCurrency(orderTotalAmount)}\n\n`;
+      csv += '=== 收款记录 ===\n';
+      csv += '日期,收款方式,金额,经办人,备注\n';
+      orderPayments.forEach((p) => {
+        csv += `${new Date(p.date).toLocaleDateString('zh-CN')},${p.method},${formatCurrency(p.amount)},${p.operator},${p.remark || ''}\n`;
+      });
+      csv += `\n已收合计,${formatCurrency(totalReceived)}\n`;
+      csv += `未收合计,${formatCurrency(totalUnreceived)}\n`;
+    } else {
+      csv = '\ufeff';
+      csv += '人员发放明细\n';
+      csv += `订单号,${currentOrder.orderNo}\n`;
+      csv += `逝者,${currentOrder.deceased.name}\n\n`;
+      csv += '=== 发放明细 ===\n';
+      csv += '姓名,岗位,基本工资,补贴,合计,发放方式,发放日期,经办人,状态\n';
+      orderShares.filter((s) => s.settled).forEach((share) => {
+        const s = staff.find((x) => x.id === share.staffId);
+        csv += `${s?.name || ''},${s?.role || ''},${formatCurrency(share.baseAmount)},${formatCurrency(share.bonus)},${formatCurrency(share.total)},${share.paidMethod || ''},${share.paidDate || ''},${share.paidOperator || ''},${share.paidOut ? '已发放' : '待发放'}\n`;
+      });
+      csv += `\n发放合计,${formatCurrency(paidOutShare)}\n`;
+      csv += `待发放,${formatCurrency(settledShare - paidOutShare)}\n`;
+    }
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${currentOrder.orderNo}_${type === 'payment' ? '结算单' : '发放明细'}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
+  const handlePrint = () => {
+    window.print();
   };
 
   return (
@@ -307,7 +413,11 @@ export default function Settlement() {
         </div>
         <div className="flex gap-2">
           <button className="btn-outline"><FileBarChart className="w-4 h-4" strokeWidth={1.8} />查看报表</button>
-          <button className="btn-gold"><Download className="w-4 h-4" strokeWidth={1.8} />导出结算单</button>
+          {activeTab !== 'monthly' && (
+            <button onClick={() => setShowStatementModal(true)} className="btn-outline"><FileSpreadsheet className="w-4 h-4" strokeWidth={1.8} />预览结算单</button>
+          )}
+          <button onClick={() => handlePrint()} className="btn-outline"><Printer className="w-4 h-4" strokeWidth={1.8} />打印</button>
+          <button className="btn-gold"><Download className="w-4 h-4" strokeWidth={1.8} />导出</button>
         </div>
       </div>
 
@@ -321,6 +431,8 @@ export default function Settlement() {
             {filteredOrders.map((order) => {
               const orderTotal = expenses.filter((e) => e.orderId === order.id).reduce((sum, e) => sum + e.amount, 0);
               const shareTotal = staffShares.filter((s) => s.orderId === order.id).reduce((sum, s) => sum + s.total, 0);
+              const payTotal = payments.filter((p) => p.orderId === order.id).reduce((s, p) => s + p.amount, 0);
+              const orderUnreceived = Math.max(0, (order.totalAmount || 0) - payTotal);
               const status = getOrderSettlementStatus(order.id);
               return (
                 <div key={order.id} onClick={() => handleOrderSelect(order.id)}
@@ -338,6 +450,7 @@ export default function Settlement() {
                   <div className="space-y-1 text-xs">
                     <div className="flex justify-between"><span className="text-ink-500">订单收入</span><span className="font-medium text-gold-dark">{formatCurrency(order.totalAmount || 0)}</span></div>
                     <div className="flex justify-between"><span className="text-ink-500">费用+分账</span><span className="font-medium text-cinnabar">{formatCurrency(orderTotal + shareTotal)}</span></div>
+                    {orderUnreceived > 0 && <div className="flex justify-between"><span className="text-ink-500">未收款</span><span className="font-medium text-cinnabar">{formatCurrency(orderUnreceived)}</span></div>}
                     <div className="pt-2 mt-2 border-t border-ink-100 flex justify-between items-center">
                       <span className="text-ink-500">
                         {status === 'completed' ? <span className="flex items-center gap-1 text-jade"><CheckCircle2 className="w-3 h-3" strokeWidth={1.8} />已结清</span>
@@ -387,7 +500,7 @@ export default function Settlement() {
               {allSettled ? (
                 <div className="p-4 rounded-lg bg-jade/5 border border-jade/30 flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-jade/10 flex items-center justify-center flex-shrink-0"><CheckCircle2 className="w-5 h-5 text-jade" strokeWidth={1.8} /></div>
-                  <div><p className="font-medium text-jade">本单已全部结清 ✓</p><p className="text-sm text-ink-500">所有 {orderExpenses.length} 项费用已支付，{orderShares.length} 位人员分账已确认且已发放</p></div>
+                  <div><p className="font-medium text-jade">本单已全部结清 ✓</p><p className="text-sm text-ink-500">所有 {orderExpenses.length} 项费用已支付，{orderShares.length} 位人员分账已确认且已发放，订单款已收齐</p></div>
                 </div>
               ) : settlementNotStarted ? (
                 <div className="p-4 rounded-lg bg-ink-50 border border-ink-200 flex items-start gap-3">
@@ -426,13 +539,14 @@ export default function Settlement() {
                       { key: 'expenses', label: '费用明细', icon: Receipt, count: orderExpenses.length, amount: totalExpense },
                       { key: 'payments', label: '收款记录', icon: Banknote, count: orderPayments.length, amount: totalReceived },
                       { key: 'shares', label: '人员分账', icon: Users, count: orderShares.length, amount: totalShare },
+                      { key: 'monthly', label: '月度对账', icon: Calendar, count: monthlyData.length, amount: undefined },
                     ].map((tab) => (
                       <button key={tab.key} onClick={() => handleTabChange(tab.key as SettlementTab)}
                         className={`tab-item flex items-center gap-2 py-3.5 ${activeTab === tab.key ? 'tab-active' : ''}`}>
                         <tab.icon className="w-4 h-4" strokeWidth={1.8} />
                         {tab.label}
                         <span className="px-1.5 py-0.5 text-xs rounded-full bg-ink-100 text-ink-600">{tab.count}</span>
-                        <span className="text-xs font-semibold text-gold-dark">{formatCurrency(tab.amount)}</span>
+                        {tab.amount !== undefined && <span className="text-xs font-semibold text-gold-dark">{formatCurrency(tab.amount)}</span>}
                       </button>
                     ))}
                   </div>
@@ -524,7 +638,10 @@ export default function Settlement() {
 
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-semibold text-ink-700">收款记录</h4>
-                        <button onClick={() => setShowAddPaymentModal(true)} className="btn-gold text-sm"><Plus className="w-4 h-4" strokeWidth={1.8} />登记收款</button>
+                        <div className="flex gap-2">
+                          <button onClick={() => exportToCSV('payment')} className="btn-outline text-sm"><Download className="w-4 h-4" strokeWidth={1.8} />导出CSV</button>
+                          <button onClick={() => setShowAddPaymentModal(true)} className="btn-gold text-sm"><Plus className="w-4 h-4" strokeWidth={1.8} />登记收款</button>
+                        </div>
                       </div>
 
                       {orderPayments.length > 0 ? (
@@ -560,13 +677,21 @@ export default function Settlement() {
                   {/* 人员分账Tab */}
                   {activeTab === 'shares' && (
                     <div className="space-y-6">
-                      {orderSchedules.length > 0 && orderShares.length === 0 && (
-                        <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between">
+                      {orderSchedules.length > 0 && (
+                        <div className={`p-4 rounded-lg border flex items-center justify-between ${orderShares.length === 0 ? 'bg-amber-50 border-amber-200' : 'bg-jade/5 border-jade/20'}`}>
                           <div className="flex items-center gap-3">
-                            <Award className="w-5 h-5 text-amber-600" strokeWidth={1.8} />
-                            <div><p className="font-medium text-amber-800">可自动生成分账</p><p className="text-sm text-amber-700">根据排班记录和人员日薪，为 {orderSchedules.length} 人次计算分账</p></div>
+                            <Award className={`w-5 h-5 ${orderShares.length === 0 ? 'text-amber-600' : 'text-jade'}`} strokeWidth={1.8} />
+                            <div>
+                              <p className={`font-medium ${orderShares.length === 0 ? 'text-amber-800' : 'text-jade'}`}>{orderShares.length === 0 ? '可自动生成分账' : '可增量补生成分账'}</p>
+                              <p className="text-sm text-ink-600">根据排班记录和人员日薪，共 {orderSchedules.length} 人次排班，{newStaffsCount > 0 ? `可补充 ${newStaffsCount} 位新人员` : '所有排班人员都已生成分账'}</p>
+                            </div>
                           </div>
-                          <button onClick={handleGenerateShares} className="btn-gold text-sm"><TrendingDown className="w-4 h-4" strokeWidth={1.8} />一键生成分账</button>
+                          <div className="flex gap-2">
+                            {orderShares.length > 0 && (
+                              <button onClick={() => exportToCSV('payout')} className="btn-outline text-sm"><Download className="w-4 h-4" strokeWidth={1.8} />导出发放明细</button>
+                            )}
+                            <button onClick={handleGenerateShares} className="btn-gold text-sm"><TrendingDown className="w-4 h-4" strokeWidth={1.8} />{orderShares.length === 0 ? '一键生成分账' : '补生成分账'}</button>
+                          </div>
                         </div>
                       )}
                       {orderSchedules.length === 0 && (
@@ -697,6 +822,83 @@ export default function Settlement() {
                       )}
                     </div>
                   )}
+
+                  {/* 月度对账Tab */}
+                  {activeTab === 'monthly' && (
+                    <div className="space-y-6">
+                      <div className="p-4 rounded-lg bg-ink-50 border border-ink-100">
+                        <p className="text-sm text-ink-600"><span className="font-semibold text-ink-700">说明：</span>按月度汇总所有订单的收入、支出、发放、未收款和利润，点击月份可展开查看该月的每一笔订单明细。</p>
+                      </div>
+                      {monthlyData.length > 0 ? (
+                        <div className="space-y-4">
+                          {monthlyData.map((item) => (
+                            <div key={item.month} className="card overflow-hidden">
+                              <button onClick={() => setExpandedMonth(expandedMonth === item.month ? null : item.month)}
+                                className="w-full p-5 bg-gradient-to-r from-ink-50 to-white hover:from-gold-50/30 transition-colors flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                  <div className="w-12 h-12 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center">
+                                    <Calendar className="w-6 h-6 text-gold-dark" strokeWidth={1.8} />
+                                  </div>
+                                  <div className="text-left">
+                                    <h4 className="font-song text-xl font-semibold text-ink-900">{item.month}</h4>
+                                    <p className="text-xs text-ink-500">{item.orders.length} 笔订单</p>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-5 gap-6 text-right">
+                                  <div><p className="text-xs text-ink-500">订单收入</p><p className="font-semibold text-gold-dark">{formatCurrency(item.totalAmount)}</p></div>
+                                  <div><p className="text-xs text-ink-500">费用支出</p><p className="font-semibold text-cinnabar">{formatCurrency(item.totalExpense)}</p></div>
+                                  <div><p className="text-xs text-ink-500">人员发放</p><p className="font-semibold text-linen">{formatCurrency(item.totalPayout)}</p></div>
+                                  <div><p className="text-xs text-ink-500">未收款</p><p className="font-semibold text-amber-600">{formatCurrency(item.totalUnreceived)}</p></div>
+                                  <div><p className="text-xs text-ink-500">利润</p><p className={`font-semibold ${item.profit >= 0 ? 'text-jade' : 'text-cinnabar'}`}>{formatCurrency(item.profit)}</p></div>
+                                </div>
+                                <div className="ml-4">
+                                  {expandedMonth === item.month ? <ChevronUp className="w-5 h-5 text-ink-400" strokeWidth={1.8} /> : <ChevronDown className="w-5 h-5 text-ink-400" strokeWidth={1.8} />}
+                                </div>
+                              </button>
+                              {expandedMonth === item.month && (
+                                <div className="p-5 border-t border-ink-100 bg-white">
+                                  <div className="overflow-x-auto rounded-lg border border-ink-200">
+                                    <table className="data-table">
+                                      <thead><tr><th>订单号</th><th>逝者</th><th>订单收入</th><th>费用</th><th>发放</th><th>已收款</th><th>未收款</th><th>利润</th><th>操作</th></tr></thead>
+                                      <tbody>
+                                        {item.orders.map((order) => {
+                                          const oExp = expenses.filter((e) => e.orderId === order.id).reduce((s, e) => s + e.amount, 0);
+                                          const oPayout = staffShares.filter((s) => s.orderId === order.id && s.paidOut).reduce((s, s2) => s + s2.total, 0);
+                                          const oRec = payments.filter((p) => p.orderId === order.id).reduce((s, p) => s + p.amount, 0);
+                                          const oAmt = order.totalAmount || 0;
+                                          const oProfit = oAmt - oExp - oPayout;
+                                          const oUnreceived = Math.max(0, oAmt - oRec);
+                                          return (
+                                            <tr key={order.id}>
+                                              <td className="font-mono text-xs">{order.orderNo}</td>
+                                              <td className="font-medium">{order.deceased.name}</td>
+                                              <td className="text-gold-dark">{formatCurrency(oAmt)}</td>
+                                              <td className="text-cinnabar">{formatCurrency(oExp)}</td>
+                                              <td className="text-linen">{formatCurrency(oPayout)}</td>
+                                              <td className="text-jade">{formatCurrency(oRec)}</td>
+                                              <td className={oUnreceived > 0 ? 'text-amber-600' : 'text-ink-400'}>{formatCurrency(oUnreceived)}</td>
+                                              <td className={oProfit >= 0 ? 'text-jade' : 'text-cinnabar'}>{formatCurrency(oProfit)}</td>
+                                              <td><button onClick={() => { handleOrderSelect(order.id); handleTabChange('expenses'); }} className="btn-ghost text-xs flex items-center gap-1 text-linen hover:text-linen-dark">去结算 <ExternalLink className="w-3 h-3" strokeWidth={1.8} /></button></td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-16 text-ink-400">
+                          <FileSpreadsheet className="w-12 h-12 mx-auto mb-3 opacity-30" strokeWidth={1.5} />
+                          <p className="text-sm">暂无月度数据</p>
+                          <p className="text-xs mt-1">请先录入订单和相关财务数据</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -798,6 +1000,160 @@ export default function Settlement() {
             <div className="p-5 border-t border-ink-100 flex justify-end gap-2">
               <button onClick={() => setShowPayoutModal(null)} className="btn-outline">取消</button>
               <button onClick={() => handlePayout(showPayoutModal)} className="btn-gold"><Check className="w-4 h-4" strokeWidth={1.8} />确认发放</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 结算单预览弹窗 */}
+      {showStatementModal && currentOrder && (
+        <div className="fixed inset-0 bg-ink-900/50 flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden animate-slide-up flex flex-col">
+            <div className="p-5 border-b border-ink-100 flex items-center justify-between flex-shrink-0">
+              <h3 className="font-song text-lg font-semibold text-ink-900">治丧结算单预览</h3>
+              <button onClick={() => setShowStatementModal(false)} className="p-1 rounded-md hover:bg-ink-100 text-ink-400"><X className="w-5 h-5" strokeWidth={1.8} /></button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="text-center mb-6">
+                <h2 className="font-song text-2xl font-bold text-ink-900">治丧服务结算单</h2>
+                <p className="text-xs text-ink-400 mt-1 font-mono">{currentOrder.orderNo}</p>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-ink-50">
+                  <div><p className="text-xs text-ink-500 mb-1">逝者</p><p className="font-semibold text-ink-900">{currentOrder.deceased.name}</p></div>
+                  <div><p className="text-xs text-ink-500 mb-1">家属</p><p className="font-semibold text-ink-900">{currentOrder.family.contactName}（{currentOrder.family.relationship}）</p></div>
+                  <div><p className="text-xs text-ink-500 mb-1">联系电话</p><p className="font-semibold text-ink-900">{currentOrder.family.phone}</p></div>
+                  <div><p className="text-xs text-ink-500 mb-1">治丧规格</p><p className="font-semibold text-ink-900">{currentOrder.funeralSpec}</p></div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-3 border-b border-ink-200">
+                  <span className="text-ink-700 font-medium">订单金额</span>
+                  <span className="font-song text-xl font-bold text-gold-dark">{formatCurrency(orderTotalAmount)}</span>
+                </div>
+
+                {orderPayments.length > 0 && (
+                  <div>
+                    <p className="text-sm font-semibold text-ink-700 mb-2">收款明细</p>
+                    <div className="border border-ink-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-ink-50"><tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">日期</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">方式</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-ink-600">金额</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">经办人</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">备注</th>
+                        </tr></thead>
+                        <tbody>
+                          {orderPayments.map((p) => (
+                            <tr key={p.id} className="border-t border-ink-100">
+                              <td className="px-3 py-2 text-ink-800">{new Date(p.date).toLocaleDateString('zh-CN')}</td>
+                              <td className="px-3 py-2 text-ink-800">{methodIcons[p.method]} {p.method}</td>
+                              <td className="px-3 py-2 text-right font-medium text-ink-800">{formatCurrency(p.amount)}</td>
+                              <td className="px-3 py-2 text-ink-800">{p.operator}</td>
+                              <td className="px-3 py-2 text-ink-500 text-xs">{p.remark || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex justify-between mt-2 text-sm">
+                      <span className="text-jade font-medium">已收合计：{formatCurrency(totalReceived)}</span>
+                      <span className={totalUnreceived > 0 ? 'text-cinnabar font-medium' : 'text-ink-400'}>{totalUnreceived > 0 ? `未收：${formatCurrency(totalUnreceived)}` : '已收齐 ✓'}</span>
+                    </div>
+                  </div>
+                )}
+
+                {orderExpenses.length > 0 && (
+                  <div>
+                    <p className="text-sm font-semibold text-ink-700 mb-2">费用支出</p>
+                    <div className="border border-ink-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-ink-50"><tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">类别</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">项目</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-ink-600">金额</th>
+                          <th className="px-3 py-2 text-center text-xs font-medium text-ink-600">状态</th>
+                        </tr></thead>
+                        <tbody>
+                          {orderExpenses.map((e) => (
+                            <tr key={e.id} className="border-t border-ink-100">
+                              <td className="px-3 py-2"><span className={`badge text-xs ${categoryColors[e.category]}`}>{e.category}</span></td>
+                              <td className="px-3 py-2 text-ink-800">{e.item}</td>
+                              <td className="px-3 py-2 text-right font-medium text-cinnabar">{formatCurrency(e.amount)}</td>
+                              <td className="px-3 py-2 text-center"><span className={`badge text-xs ${e.paid ? 'bg-jade/10 text-jade border-jade/30' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{e.paid ? '已付' : '待付'}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-ink-50/50 border-t border-ink-200">
+                          <tr><td colSpan={2} className="px-3 py-2 text-right font-semibold text-ink-700">费用合计</td><td className="px-3 py-2 text-right font-bold text-cinnabar">{formatCurrency(totalExpense)}</td><td></td></tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {orderShares.filter(s => s.settled).length > 0 && (
+                  <div>
+                    <p className="text-sm font-semibold text-ink-700 mb-2">人员分账</p>
+                    <div className="border border-ink-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-ink-50"><tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">姓名</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">岗位</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-ink-600">合计</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">发放方式</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-ink-600">经办人</th>
+                          <th className="px-3 py-2 text-center text-xs font-medium text-ink-600">状态</th>
+                        </tr></thead>
+                        <tbody>
+                          {orderShares.filter(s => s.settled).map((share) => {
+                            const s = staff.find(x => x.id === share.staffId);
+                            return (
+                              <tr key={share.id} className="border-t border-ink-100">
+                                <td className="px-3 py-2 font-medium text-ink-800">{s?.name || '-'}</td>
+                                <td className="px-3 py-2 text-ink-600">{s?.role || '-'}</td>
+                                <td className="px-3 py-2 text-right font-medium text-gold-dark">{formatCurrency(share.total)}</td>
+                                <td className="px-3 py-2 text-ink-600">{share.paidMethod || '-'}</td>
+                                <td className="px-3 py-2 text-ink-600">{share.paidOperator || '-'}</td>
+                                <td className="px-3 py-2 text-center"><span className={`badge text-xs ${share.paidOut ? 'bg-jade/10 text-jade border-jade/30' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{share.paidOut ? '已发放' : '待发放'}</span></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot className="bg-ink-50/50 border-t border-ink-200">
+                          <tr><td colSpan={2} className="px-3 py-2 text-right font-semibold text-ink-700">分账合计</td><td className="px-3 py-2 text-right font-bold text-gold-dark">{formatCurrency(paidOutShare)}</td><td colSpan={3}></td></tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                <div className="p-4 rounded-lg bg-gradient-to-r from-gold-50 to-amber-50 border border-gold/30 mt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-ink-600 mb-1">净利润（订单收入 - 费用 - 分账）</p>
+                      <p className={`font-song text-3xl font-bold ${profit >= 0 ? 'text-jade' : 'text-cinnabar'}`}>{profit >= 0 ? '+' : ''}{formatCurrency(profit)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-ink-600 mb-1">利润率</p>
+                      <p className={`text-xl font-bold ${orderTotalAmount > 0 && profit >= 0 ? 'text-jade' : 'text-cinnabar'}`}>{orderTotalAmount > 0 ? `${((profit / orderTotalAmount) * 100).toFixed(1)}%` : '—'}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="p-5 border-t border-ink-100 flex justify-between flex-shrink-0">
+              <div className="text-sm text-ink-500">
+                <p>打印日期：{new Date().toLocaleDateString('zh-CN')}</p>
+                <p className="text-xs">经办人：周师傅</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { exportToCSV('payment'); exportToCSV('payout'); }} className="btn-outline"><Download className="w-4 h-4" strokeWidth={1.8} />导出全部</button>
+                <button onClick={() => handlePrint()} className="btn-gold"><Printer className="w-4 h-4" strokeWidth={1.8} />打印结算单</button>
+              </div>
             </div>
           </div>
         </div>

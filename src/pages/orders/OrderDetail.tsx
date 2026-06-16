@@ -84,7 +84,7 @@ export default function OrderDetail() {
   const hasExpenses = orderExpenses.length > 0;
   const hasShares = orderShares.length > 0;
   const hasPayments = orderPayments.length > 0;
-  const allSettled = hasExpenses && hasShares && unpaidExpenseCount === 0 && unsettledShareCount === 0 && unpaidOutCount === 0;
+  const allSettled = hasExpenses && hasShares && unpaidExpenseCount === 0 && unsettledShareCount === 0 && unpaidOutCount === 0 && totalUnreceived === 0;
   const settlementNotStarted = !hasExpenses && !hasShares && !hasPayments;
   const profit = (order?.totalAmount || 0) - totalExpense - totalShare;
 
@@ -201,7 +201,7 @@ export default function OrderDetail() {
           <div className="flex-1">
             <p className="font-medium text-jade">本单已全部结清 ✓</p>
             <p className="text-sm text-ink-500">
-              所有 {orderExpenses.length} 项费用已支付，{orderShares.length} 位人员分账已确认且已发放
+              所有 {orderExpenses.length} 项费用已支付，{orderShares.length} 位人员分账已确认且已发放，订单款已收齐
             </p>
           </div>
           <button
