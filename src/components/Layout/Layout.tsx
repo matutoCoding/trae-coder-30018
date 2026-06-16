@@ -20,10 +20,17 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
 
 export default function Layout() {
   const location = useLocation();
-  const pageInfo = pageTitles[location.pathname] || {
-    title: '孝思堂管理系统',
-    subtitle: '殡葬白事执事司仪团队管理平台',
-  };
+  let pageInfo = pageTitles[location.pathname];
+  if (!pageInfo) {
+    if (location.pathname.startsWith('/orders/')) {
+      pageInfo = { title: '订单详情', subtitle: '查看订单完整信息与处理进度' };
+    } else {
+      pageInfo = {
+        title: '孝思堂管理系统',
+        subtitle: '殡葬白事执事司仪团队管理平台',
+      };
+    }
+  }
 
   return (
     <div className="flex min-h-screen bg-pattern-cloud">

@@ -3,6 +3,7 @@ import Layout from "@/components/Layout/Layout";
 import Dashboard from "@/pages/Dashboard";
 import OrderList from "@/pages/orders/OrderList";
 import OrderCreate from "@/pages/orders/OrderCreate";
+import OrderDetail from "@/pages/orders/OrderDetail";
 import Scheduling from "@/pages/scheduling/Scheduling";
 import RitualTemplates from "@/pages/rituals/RitualTemplates";
 import MaterialManage from "@/pages/materials/MaterialManage";
@@ -18,6 +19,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<OrderList />} />
           <Route path="orders/new" element={<OrderCreate />} />
+          <Route path="orders/:id" element={<OrderDetail />} />
           <Route path="scheduling" element={<Scheduling />} />
           <Route path="rituals" element={<RitualTemplates />} />
           <Route path="materials" element={<MaterialManage />} />
